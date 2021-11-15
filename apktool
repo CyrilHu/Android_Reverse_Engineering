@@ -1,0 +1,69 @@
+#!/bin/sh
+
+set -e
+
+APK_FILE=$2
+TOOLS_DIR=$( cd "$(dirname "${BASH_SOURCE[0]}")" ; pwd -P )
+
+function help() {
+    echo "apktool decode|run|build"
+}
+
+function decode() {
+    ORIGINAL_DIR=$PWD
+    APK_FILE_NAME="${APK_FILE%.*}"
+    mkdir "$APK_FILE_NAME"
+    java -jar "$TOOLS_DIR/bin/apktool.jar" d "$APK_FILE" -o "$APK_FILE_NAME/smali"
+    initGit "$APK_FILE_NAME/smali"
+    $TOOLS_DIR/bin/jadx/bin/jadx -e "$APK_FILE" -d "$APK_FILE_NAME/source"
+    initGit "$APK_FILE_NAME/source"
+}
+
+function initGit() {
+    ORIGINAL_DIR=$PWD
+    cd "$1"
+    git init .
+    echo "build/" >> .gitignore
+    git add .
+    git commit -m "Initialize"
+    cd "$ORIGINAL_DIR"
+}
+
+function build() {
+    if ! [ -z "$APK_FILE" ]; then
+        cd $APK_FILE
+    fi
+    java -jar "$TOOLS_DIR/bin/apktool.jar" b smali -o modified.apk
+    # TODO: 生成 debug 证书
+    apksigner sign --ks key.keystore --ks-key-alias test --ks-pass pass:test123456 modified.apk
+}
+
+function run() {
+    build
+    adb install --no-incremental modified.apk
+    
+    # PACKAGE_NAME=$( aapt dump badging $APK_FILE_NAME | grep 'package\|launchable-activity' | awk '{for(i=1;i<=NF;i++){if($i ~ /^name=/){print $i}}}' |awk -F\= '{print $NF}' |tr -d \'\' )
+    # echo $PACKAGE_NAME
+    # RESOLVE_ACTIVITY=$( adb shell cmd package resolve-activity --brief $PACKAGE_NAME |tail -n1 |grep -v ^$)
+
+    adb shell am start -D -n com.shamim.cam/com.android.camera.CameraLauncher
+}
+
+SHELL_RC_FILE=$HOME/.zshrc
+# if ! [[ $(command -v apktool) ]]; then
+#     echo "alias apktool=\"$BASH_SOURCE"" >> $SHELL_RC_FILE
+# fi
+
+case "$1" in
+    d|decode)
+    decode
+    ;;
+    b|build)
+    build
+    ;;
+    r|run)
+    run
+    ;;
+    *)
+    help
+esac
